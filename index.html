@@ -870,7 +870,7 @@ If words look even and clean, the font works well.</textarea>
             translation.defaultPreviewText += '\n© My Font ™  ♡ ☆ ✿ ♪\n(｡･ω･｡)  (˶ᵔ ᵕ ᵔ˶)  ฅ(•ω•)ฅ  ٩(ˊᗜˋ*)و  (づ｡◕‿‿◕｡)づ';
         }
 
-        Object.assign(translations.zh, { importFont: '导入已有字体（TTF / OTF）', importFontHint: '导入旧字体，只补写缺少的字符。当前已画好的字符会保留。', importBusy: '正在读取字体…', importDone: '已导入 {count} 个字符，保留已有字符；现在可以补写缺少的符号。', importEmpty: '没有可补充的字形：可能已经写过，或字体不包含当前列表中的字符。', importError: '导入失败，请确认是有效的 TTF / OTF 文件，且浏览器存储空间充足。' });
+        Object.assign(translations.zh, { importFont: '导入已有字体（TTF / OTF）', importFontHint: '导入旧字体，只补写缺少的字符。当前已画好的字符会保留。', importBusy: '正在读取字体…', importDone: '已导入 {count} 个字符，保留已有字符；现在可以补写缺少的符号。', importEmpty: '没有可补充的字形：可能已经写过，或字体不包含当前列表中的字符。', importError: '导入未完成，具体原因如下：' });
         Object.assign(translations.en, { importFont: 'Import existing font (TTF / OTF)', importFontHint: 'Reuse your old letters and draw only missing symbols. Existing drawings are kept.', importBusy: 'Reading font…', importDone: 'Imported {count} characters; existing drawings were kept. You can now draw missing symbols.', importEmpty: 'No new outlines found for the available characters.', importError: 'Import failed. Check that this is a valid TTF / OTF file and browser storage is available.' });
         Object.assign(translations.ja, { importFont: '既存のフォントを読み込む（TTF / OTF）', importFontHint: '以前の文字を読み込み、足りない記号だけ描けます。既存の文字は保持します。', importBusy: '読み込み中…', importDone: '{count} 文字を読み込みました。既存の文字は保持しました。', importEmpty: '追加できる文字がありません。', importError: '読み込みに失敗しました。TTF / OTF ファイルと保存容量を確認してください。' });
         const CHAR_SETS = translations.zh.charSets;
@@ -879,6 +879,46 @@ If words look even and clean, the font works well.</textarea>
         
         // Default preview text
         const DEFAULT_PREVIEW_TEXT = "In 1984, Jack wrote a quick note about a quiet fox and a lazy dog. Lily asked, \"Does this font feel clear and friendly?\" Jack smiled: \"Maybe, but check every letter.\"\nThey typed a short line: Pack my box with five dozen liquor jugs, and fixed a quirky zebra story.\nFor contact, Jack left an email: fafa27756@mail.com, and added, \"Reply before 8:30, ok?\"\nThey tried simple marks like . , ! ? : ; ( ) [ ] { } - _ + = @ # & /\nIf words look even and clean, the font works well.";
+
+        // Font outlines can exceed localStorage's small string quota.
+        // Read legacy data until a successful IndexedDB save has migrated it.
+        const fontStorage = (() => {
+            let database;
+            function open() {
+                if (!database) database = new Promise((resolve, reject) => {
+                    const request = indexedDB.open('fontcraft-workspace', 1);
+                    request.onupgradeneeded = () => request.result.createObjectStore('documents');
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                    request.onblocked = () => reject(new Error('请关闭其他 FontCraft 标签页后重试'));
+                });
+                return database;
+            }
+            async function read(key) {
+                const db = await open();
+                const result = await new Promise((resolve, reject) => {
+                    const tx = db.transaction('documents', 'readonly');
+                    const request = tx.objectStore('documents').get(key);
+                    tx.oncomplete = () => resolve(request.result);
+                    tx.onabort = () => reject(tx.error || new Error('读取字体失败'));
+                });
+                return result === undefined ? JSON.parse(localStorage.getItem(key) || 'null') : result;
+            }
+            async function write(key, value) {
+                // Snapshot now, before waiting for the database, to preserve save ordering.
+                const snapshot = structuredClone(value);
+                const db = await open();
+                await new Promise((resolve, reject) => {
+                    const tx = db.transaction('documents', 'readwrite');
+                    tx.objectStore('documents').put(snapshot, key);
+                    tx.oncomplete = resolve;
+                    tx.onabort = () => reject(tx.error || new Error('保存字体失败'));
+                });
+                try { localStorage.removeItem(key); } catch (_) { /* IndexedDB already saved. */ }
+            }
+            return { read, write };
+        })();
+        window.fontcraftStorage = fontStorage;
 
         // Application State
         const state = {
@@ -1091,7 +1131,22 @@ If words look even and clean, the font works well.</textarea>
         }
 
         /** Initialization **/
-        function init() {
+        async function init() {
+            const main = document.querySelector('main');
+            main.inert = true;
+            try {
+                const [library, fonts] = await Promise.all([
+                    fontStorage.read(STORAGE_KEY), fontStorage.read('fontcraft_saved_fonts')
+                ]);
+                if (library) state.library = library;
+                if (fonts) state.savedFonts = fonts;
+            } catch (error) {
+                document.getElementById('import-font-status').textContent = '浏览器字体存储暂不可用：' + error.message;
+            } finally {
+                main.inert = false;
+            }
+            els.inputFontName.value = state.library.name;
+            if (els.inputFontNameDesktop) els.inputFontNameDesktop.value = state.library.name;
             // Load language preference
             const savedLang = localStorage.getItem('fontcraft_lang');
             if (savedLang && translations[savedLang]) {
@@ -1380,7 +1435,9 @@ If words look even and clean, the font works well.</textarea>
         }
 
         function saveLibrary() {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(state.library));
+            fontStorage.write(STORAGE_KEY, state.library).catch(error => {
+                document.getElementById('import-font-status').textContent = '画稿尚未保存，请先导出字体：' + error.message;
+            });
             updateNav();
         }
 
@@ -1917,14 +1974,20 @@ If words look even and clean, the font works well.</textarea>
             const status = document.getElementById('import-font-status');
             input.disabled = true;
             status.textContent = t('importBusy');
+            let phase = '读取文件';
             try {
-                if (file.size > 20 * 1024 * 1024) throw new Error('Font exceeds 20 MB');
-                const font = opentype.parse(await file.arrayBuffer());
+                if (file.size > 20 * 1024 * 1024) throw new Error('字体文件超过 20 MB，请选择较小的文件');
+                const buffer = await file.arrayBuffer();
+                phase = '解析字体';
+                if (typeof opentype === 'undefined') throw new Error('字体组件未加载，请刷新页面后重试');
+                const font = opentype.parse(buffer);
+                phase = '转换字形';
                 const additions = {};
                 for (const char of ALL_CHARS) {
                     if (state.library.chars[char]) continue;
                     const data = importedGlyphData(font, char);
                     if (data) additions[char] = data;
+                    if (Object.keys(additions).length % 10 === 0) await new Promise(resolve => setTimeout(resolve, 0));
                 }
                 const count = Object.keys(additions).length;
                 if (!count) { status.textContent = t('importEmpty'); return; }
@@ -1934,7 +1997,9 @@ If words look even and clean, the font works well.</textarea>
                     chars: { ...additions, ...state.library.chars }
                 };
                 // Save before changing the canvas so storage failures cannot lose the current work.
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+                phase = '保存字体';
+                await fontStorage.write(STORAGE_KEY, next);
+                phase = '显示字形';
                 state.library = next;
                 els.inputFontName.value = next.name;
                 if (els.inputFontNameDesktop) els.inputFontNameDesktop.value = next.name;
@@ -1945,7 +2010,7 @@ If words look even and clean, the font works well.</textarea>
                 status.textContent = t('importDone').replace('{count}', count);
             } catch (error) {
                 console.error('Font import failed:', error);
-                status.textContent = t('importError');
+                status.textContent = `${t('importError')}（${phase}：${error.name || 'Error'} · ${error.message || '未知错误'}）`;
             } finally {
                 input.disabled = false;
                 input.value = '';
@@ -2018,7 +2083,7 @@ If words look even and clean, the font works well.</textarea>
             // Add to saved fonts
             state.savedFonts.push(fontData);
             try {
-                localStorage.setItem('fontcraft_saved_fonts', JSON.stringify(state.savedFonts));
+                await fontStorage.write('fontcraft_saved_fonts', state.savedFonts);
             } catch (e) {
                 console.error('localStorage save error:', e);
                 if (e.name === 'QuotaExceededError') {
@@ -2183,7 +2248,7 @@ If words look even and clean, the font works well.</textarea>
                 }
                 
                 state.savedFonts.splice(index, 1);
-                localStorage.setItem('fontcraft_saved_fonts', JSON.stringify(state.savedFonts));
+                await fontStorage.write('fontcraft_saved_fonts', state.savedFonts);
                 renderFontLibrary();
             }
         }
@@ -2376,7 +2441,7 @@ If words look even and clean, the font works well.</textarea>
         window.showConfirm = showConfirm;
 
         // Run
-        init();
+        window.fontcraftReady = init();
 
     </script>
     
@@ -2386,6 +2451,8 @@ If words look even and clean, the font works well.</textarea>
         import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, getDocs, deleteDoc, query } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
         
+        await window.fontcraftReady;
+
         // Firebase configuration
         const firebaseConfig = {
             apiKey: "AIzaSyBzq1tnmpnmoM9PNeFh7o_LWQP4SR3irBI",
@@ -2422,7 +2489,7 @@ If words look even and clean, the font works well.</textarea>
                 currentUser = result.user;
                 
                 // Check if user has local fonts
-                const localFonts = JSON.parse(localStorage.getItem('fontcraft_saved_fonts')) || [];
+                const localFonts = (await window.fontcraftStorage.read('fontcraft_saved_fonts')) || [];
                 if (localFonts.length > 0) {
                     const t = (key) => window.state && window.translations ? window.translations[window.state.currentLang][key] || key : key;
                     const confirmed = await window.showConfirm(
@@ -2437,7 +2504,7 @@ If words look even and clean, the font works well.</textarea>
                         }
                         // Update localStorage with synced status
                         try {
-                            localStorage.setItem('fontcraft_saved_fonts', JSON.stringify(localFonts));
+                            await window.fontcraftStorage.write('fontcraft_saved_fonts', localFonts);
                         } catch (e) {
                             console.error('localStorage save error:', e);
                         }
@@ -2459,7 +2526,7 @@ If words look even and clean, the font works well.</textarea>
                 await signOut(auth);
                 currentUser = null;
                 // Load local fonts and mark them as not synced
-                const localFonts = JSON.parse(localStorage.getItem('fontcraft_saved_fonts')) || [];
+                const localFonts = (await window.fontcraftStorage.read('fontcraft_saved_fonts')) || [];
                 // Remove synced status when logged out
                 localFonts.forEach(font => {
                     font.synced = false;
@@ -2494,7 +2561,7 @@ If words look even and clean, the font works well.</textarea>
                 userInfo.style.display = 'none';
                 
                 // Load local fonts and mark them as not synced
-                const localFonts = JSON.parse(localStorage.getItem('fontcraft_saved_fonts')) || [];
+                const localFonts = (await window.fontcraftStorage.read('fontcraft_saved_fonts')) || [];
                 // Remove synced status when logged out
                 localFonts.forEach(font => {
                     font.synced = false;
@@ -2527,7 +2594,7 @@ If words look even and clean, the font works well.</textarea>
             } catch (error) {
                 console.error('Load fonts error:', error);
                 // If Firestore fails, load local fonts instead
-                const localFonts = JSON.parse(localStorage.getItem('fontcraft_saved_fonts')) || [];
+                const localFonts = (await window.fontcraftStorage.read('fontcraft_saved_fonts')) || [];
                 
                 // Ensure state exists before setting
                 if (window.state) {

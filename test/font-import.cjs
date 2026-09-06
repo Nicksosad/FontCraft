@@ -19,10 +19,10 @@ const font = new opentype.Font({familyName:'OldHandwriting',styleName:'Regular',
 let blob;
 const status = {};
 const saved = [];
-const sandbox = {opentype, console, Blob, encodeURIComponent, ALL_CHARS:['A','B','©'], font,
+const sandbox = {opentype, console, Blob, encodeURIComponent, setTimeout, ALL_CHARS:['A','B','©'], font,
  document:{getElementById:()=>status, createElement:()=>({click(){},remove(){}}),body:{appendChild(){},removeChild(){}}},
  URL:{createObjectURL(value){blob=value;return 'blob:test'},revokeObjectURL(){}},
- localStorage:{setItem(key,value){saved.push(value)}}, STORAGE_KEY:'test',
+ fontStorage:{async write(key,value){saved.push(value)}}, STORAGE_KEY:'test',
  state:{library:{name:'Current',chars:{'©':{cropped:'drawing'}}}},
  els:{inputFontName:{},inputFontNameDesktop:{}},
  t:key=>key,renderCharacterPicker(){},updateCanvasView(){},updateNav(){},renderPreview(){},
@@ -50,7 +50,7 @@ for(const name of ['importedGlyphData','importExistingFont','generateAndDownload
  const before=sandbox.state.library;
  sandbox.state.library={name:'New',chars:{}};
  const unchanged=sandbox.state.library;
- sandbox.localStorage.setItem=()=>{throw new Error('quota')};
+ sandbox.fontStorage.write=async()=>{throw new Error('quota')};
  sandbox.console={error(){}};
  await sandbox.importExistingFont({target:input});
  assert.equal(sandbox.state.library,unchanged,'storage failure must leave current work intact');

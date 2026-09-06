@@ -17,3 +17,9 @@ GitHub Pages：将代码推送到 `main`，在仓库 Settings → Pages → Buil
 如果旧作品只存在原网站的字体库里，先从原网站下载字体文件，再在此导入。
 
 导入/导出回归测试：安装 opentype.js 1.3.4 后运行 `node test/font-import.cjs`，或通过 `OPENTYPE_JS` 指定该版本库文件的位置。
+
+## 大字体保存
+
+当前画稿和本地字体库使用 IndexedDB 保存，避免原版逐像素轮廓导入后超过 localStorage 容量。旧版 localStorage 数据仍可读取，只有数据库写入成功后才清理同一份旧数据。
+
+大字体浏览器回归页：`node test/create-storage-smoke.cjs dense-font.ttf /path/to/opentype.js /tmp/fontcraft-storage-smoke.html`。使用同一浏览器先打开该页，再打开 `?reload=1`，检查导入、旧存储迁移、补写字符、保存字体库和刷新恢复。
