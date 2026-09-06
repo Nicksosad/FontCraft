@@ -838,6 +838,26 @@ If words look even and clean, the font works well.</textarea>
             }
         };
         
+        // Extended character palette, shared by every language and font export.
+        const EXTRA_CHAR_GROUPS = [
+            { names: { zh: '版权与常用符号', en: 'Copyright & Symbols', ja: '著作権・一般記号' }, chars: '©®™℠℗§¶†‡°℃℉№…·•‧・。，、；：？！＂＇“”‘’「」『』【】〔〕（）［］｛｝〈〉《》—–〜～￥€£¢¤' },
+            { names: { zh: '爱心与装饰', en: 'Hearts & Decorations', ja: 'ハート・飾り' }, chars: '♡♥❤❥❣ღ❦❧☆★✩✧✦✪✫✬✭✮✯✰✶✷✸✹✺✻✼❀✿❁❃❋❊☀☁☂☃☄☾☽☼♪♫♬♩♭♯✓✔✕✖✗✘' },
+            { names: { zh: '箭头与几何', en: 'Arrows & Shapes', ja: '矢印・図形' }, chars: '←↑→↓↔↕↖↗↘↙↩↪⇒⇐⇔➜➤➳○●◎◉◌◯□■▢▣△▲▽▼◇◆◈◊⊙⊕⊗∞≈≠≤≥±×÷√∑' },
+            { names: { zh: '颜文字 · 表情', en: 'Kaomoji · Faces', ja: '顔文字・表情' }, chars: 'ᗜو◕‿ω꒳ᴥᵕᵔᵒᴗᴖᴕʘʚɞɷɯʌʖʕʔ˙˘˛ˇˊˋˎˏ˖˗˃˂˶˵˷°º｡ﾟ･ಥಠಡಡ눈益Дд∀▽д皿口囗ㅅ人艸灬﹏︿﹀へノ乀乁彡ミっつッツシヮロ' },
+            { names: { zh: '颜文字 · 手势与边框', en: 'Kaomoji · Gestures & Frames', ja: '顔文字・手と枠' }, chars: 'づヾゞヽ٩۶୧୨งกฅლщଘଓᐛᐖᕕᕗᕙᕦᕤᓀᓂᐢᐡᑋᵎꈍꈊꈨ꒰꒱༼༽༺༻༶⌒⌣⌢⌯⌁⌗⌇⌜⌝⌞⌟⸝⸜⸌⸍₍₎⁽⁾₊⁺₋⁻﹙﹚' }
+        ];
+        for (const [language, translation] of Object.entries(translations)) {
+            const seen = new Set(Object.values(translation.charSets).flat());
+            for (const group of EXTRA_CHAR_GROUPS) {
+                translation.charSets[group.names[language]] = Array.from(group.chars).filter(char => {
+                    if (seen.has(char)) return false;
+                    seen.add(char);
+                    return true;
+                });
+            }
+            translation.defaultPreviewText += '\n© My Font ™  ♡ ☆ ✿ ♪\n(｡･ω･｡)  (˶ᵔ ᵕ ᵔ˶)  ฅ(•ω•)ฅ  ٩(ˊᗜˋ*)و  (づ｡◕‿‿◕｡)づ';
+        }
+
         const CHAR_SETS = translations.zh.charSets;
 
         const ALL_CHARS = Object.values(CHAR_SETS).flat();
@@ -1810,7 +1830,7 @@ If words look even and clean, the font works well.</textarea>
                 
                 // Trim leading spaces from the line
                 const trimmedLine = line.trimStart();
-                const chars = trimmedLine.split('');
+                const chars = Array.from(trimmedLine);
                 
                 chars.forEach(char => {
                 if (char === ' ') {
@@ -2120,7 +2140,7 @@ If words look even and clean, the font works well.</textarea>
             // Process each character
             for (const char of ALL_CHARS) {
                 const charData = library.chars[char];
-                const unicode = char.charCodeAt(0);
+                const unicode = char.codePointAt(0);
                 
                 if (!charData) {
                     // Create empty glyph for missing characters
