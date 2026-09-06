@@ -8,6 +8,7 @@ const { translations, chars } = vm.runInNewContext(html.slice(start, end) + '; (
 assert.equal(chars.length, new Set(chars).size, 'font export must not contain duplicate characters');
 for (const translation of Object.values(translations)) {
   const localized = Object.values(translation.charSets).flat();
+  assert.equal(localized[0], '©', 'copyright must be the first visible character in every language');
   assert.deepEqual(Array.from(localized), Array.from(chars), 'language switching must preserve the exact character set');
 }
 for (const char of Array.from('©®™♡♥☆★ω꒳ᵕʕʔฅ٩وᗜ◕‿')) assert(chars.includes(char), `missing ${char}`);

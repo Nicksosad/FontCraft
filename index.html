@@ -847,14 +847,17 @@ If words look even and clean, the font works well.</textarea>
             { names: { zh: '颜文字 · 手势与边框', en: 'Kaomoji · Gestures & Frames', ja: '顔文字・手と枠' }, chars: 'づヾゞヽ٩۶୧୨งกฅლщଘଓᐛᐖᕕᕗᕙᕦᕤᓀᓂᐢᐡᑋᵎꈍꈊꈨ꒰꒱༼༽༺༻༶⌒⌣⌢⌯⌁⌗⌇⌜⌝⌞⌟⸝⸜⸌⸍₍₎⁽⁾₊⁺₋⁻﹙﹚' }
         ];
         for (const [language, translation] of Object.entries(translations)) {
-            const seen = new Set(Object.values(translation.charSets).flat());
+            const originalCharSets = translation.charSets;
+            const seen = new Set(Object.values(originalCharSets).flat());
+            const extraCharSets = {};
             for (const group of EXTRA_CHAR_GROUPS) {
-                translation.charSets[group.names[language]] = Array.from(group.chars).filter(char => {
+                extraCharSets[group.names[language]] = Array.from(group.chars).filter(char => {
                     if (seen.has(char)) return false;
                     seen.add(char);
                     return true;
                 });
             }
+            translation.charSets = { ...extraCharSets, ...originalCharSets };
             translation.defaultPreviewText += '\n© My Font ™  ♡ ☆ ✿ ♪\n(｡･ω･｡)  (˶ᵔ ᵕ ᵔ˶)  ฅ(•ω•)ฅ  ٩(ˊᗜˋ*)و  (づ｡◕‿‿◕｡)づ';
         }
 
