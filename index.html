@@ -316,6 +316,15 @@
 
     <main class="max-w-6xl mx-auto px-4 sm:px-6 py-4 md:py-8 sm:py-12">
         
+        <div class="cartoon-card p-4 mb-6">
+            <label class="cartoon-btn inline-block bg-white px-4 py-2 rounded-lg font-bold cursor-pointer">
+                <span data-i18n="importFont">导入已有字体（TTF / OTF）</span>
+                <input id="import-font-file" type="file" accept=".ttf,.otf" class="hidden">
+            </label>
+            <p class="text-sm text-slate-500 mt-2" data-i18n="importFontHint">导入旧字体，只补写缺少的字符。当前已画好的字符会保留。</p>
+            <p id="import-font-status" class="text-sm mt-2" role="status" aria-live="polite"></p>
+        </div>
+
         <!-- View: Drawing -->
         <div id="view-draw" class="grid md:grid-cols-12 gap-10 items-start">
             
@@ -861,6 +870,9 @@ If words look even and clean, the font works well.</textarea>
             translation.defaultPreviewText += '\n© My Font ™  ♡ ☆ ✿ ♪\n(｡･ω･｡)  (˶ᵔ ᵕ ᵔ˶)  ฅ(•ω•)ฅ  ٩(ˊᗜˋ*)و  (づ｡◕‿‿◕｡)づ';
         }
 
+        Object.assign(translations.zh, { importFont: '导入已有字体（TTF / OTF）', importFontHint: '导入旧字体，只补写缺少的字符。当前已画好的字符会保留。', importBusy: '正在读取字体…', importDone: '已导入 {count} 个字符，保留已有字符；现在可以补写缺少的符号。', importEmpty: '没有可补充的字形：可能已经写过，或字体不包含当前列表中的字符。', importError: '导入失败，请确认是有效的 TTF / OTF 文件，且浏览器存储空间充足。' });
+        Object.assign(translations.en, { importFont: 'Import existing font (TTF / OTF)', importFontHint: 'Reuse your old letters and draw only missing symbols. Existing drawings are kept.', importBusy: 'Reading font…', importDone: 'Imported {count} characters; existing drawings were kept. You can now draw missing symbols.', importEmpty: 'No new outlines found for the available characters.', importError: 'Import failed. Check that this is a valid TTF / OTF file and browser storage is available.' });
+        Object.assign(translations.ja, { importFont: '既存のフォントを読み込む（TTF / OTF）', importFontHint: '以前の文字を読み込み、足りない記号だけ描けます。既存の文字は保持します。', importBusy: '読み込み中…', importDone: '{count} 文字を読み込みました。既存の文字は保持しました。', importEmpty: '追加できる文字がありません。', importError: '読み込みに失敗しました。TTF / OTF ファイルと保存容量を確認してください。' });
         const CHAR_SETS = translations.zh.charSets;
 
         const ALL_CHARS = Object.values(CHAR_SETS).flat();
@@ -1102,6 +1114,7 @@ If words look even and clean, the font works well.</textarea>
         }
 
         function setupEventListeners() {
+            document.getElementById('import-font-file').addEventListener('change', importExistingFont);
             // Language Switcher
             // Desktop language dropdown
             els.btnLang.addEventListener('click', (e) => {
@@ -1872,6 +1885,73 @@ If words look even and clean, the font works well.</textarea>
             });
         }
 
+        // Keep original outlines and spacing; only rasterize for the editing preview.
+        function importedGlyphData(font, char) {
+            const index = font.charToGlyphIndex(char);
+            if (!index) return null;
+            const glyph = font.glyphs.get(index);
+            if (!glyph.path.commands.length) return null;
+            const scale = 1000 / font.unitsPerEm;
+            const commands = glyph.path.commands.map(command => {
+                const result = { type: command.type };
+                for (const key of ['x', 'y', 'x1', 'y1', 'x2', 'y2']) {
+                    if (command[key] !== undefined) result[key] = command[key] * scale;
+                }
+                return result;
+            });
+            const path = glyph.getPath(0, 375, 500);
+            const width = Math.max(1, Math.ceil(glyph.advanceWidth * scale / 2));
+            const preview = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="500" viewBox="0 0 ${width} 500">${path.toSVG()}</svg>`;
+            const editing = `<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="0 0 500 500">${path.toSVG()}</svg>`;
+            return {
+                original: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(editing),
+                cropped: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(preview),
+                importedOutline: { commands, advanceWidth: glyph.advanceWidth * scale }
+            };
+        }
+
+        async function importExistingFont(event) {
+            const input = event.target;
+            const file = input.files[0];
+            if (!file) return;
+            const status = document.getElementById('import-font-status');
+            input.disabled = true;
+            status.textContent = t('importBusy');
+            try {
+                if (file.size > 20 * 1024 * 1024) throw new Error('Font exceeds 20 MB');
+                const font = opentype.parse(await file.arrayBuffer());
+                const additions = {};
+                for (const char of ALL_CHARS) {
+                    if (state.library.chars[char]) continue;
+                    const data = importedGlyphData(font, char);
+                    if (data) additions[char] = data;
+                }
+                const count = Object.keys(additions).length;
+                if (!count) { status.textContent = t('importEmpty'); return; }
+                const hasExisting = Object.keys(state.library.chars).length > 0;
+                const next = { ...state.library,
+                    name: hasExisting ? state.library.name : file.name.replace(/\.(ttf|otf)$/i, ''),
+                    chars: { ...additions, ...state.library.chars }
+                };
+                // Save before changing the canvas so storage failures cannot lose the current work.
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+                state.library = next;
+                els.inputFontName.value = next.name;
+                if (els.inputFontNameDesktop) els.inputFontNameDesktop.value = next.name;
+                renderCharacterPicker();
+                updateCanvasView();
+                updateNav();
+                renderPreview();
+                status.textContent = t('importDone').replace('{count}', count);
+            } catch (error) {
+                console.error('Font import failed:', error);
+                status.textContent = t('importError');
+            } finally {
+                input.disabled = false;
+                input.value = '';
+            }
+        }
+
         /** Font Library Management **/
         
         async function saveToFontLibrary() {
@@ -2157,7 +2237,14 @@ If words look even and clean, the font works well.</textarea>
                 }
                 
                 // Convert image to path
-                const path = await convertImageToPath(charData.cropped || charData);
+                let path;
+                if (charData.importedOutline) {
+                    const preserved = new opentype.Path();
+                    preserved.commands = charData.importedOutline.commands.map(command => ({ ...command }));
+                    path = { opentypePath: preserved, advanceWidth: charData.importedOutline.advanceWidth };
+                } else {
+                    path = await convertImageToPath(charData.cropped || charData);
+                }
                 
                 const safeAdvance = (Number.isFinite(path.advanceWidth) && path.advanceWidth > 0)
                     ? Math.round(path.advanceWidth)
